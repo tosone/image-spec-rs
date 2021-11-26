@@ -79,6 +79,7 @@ name = "image-spec"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "digest",
  "regex",
  "serde",
  "serde_derive",

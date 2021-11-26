@@ -1,135 +1,167 @@
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt::Result;
-use std::string::String;
-use std::sync::{Arc, Mutex};
+use std::io::{Error, ErrorKind};
+
+/// sha256 with hex encoding (lower case only)
+pub const SHA256: &str = "sha256";
+/// sha384 with hex encoding (lower case only)
+pub const SHA384: &str = "sha384";
+/// sha512 with hex encoding (lower case only)
+pub const SHA512: &str = "sha512";
 
 // CANONICAL is the primary digest algorithm used with the distribution
 // project. Other digests may be used but this one is the primary storage
 // digest.
-pub const CANONICAL: &str = super::sha::SHA256;
-
-// BLAKE3 is the blake3 algorithm with the default 256-bit output size
-// github.com/opencontainers/go-digest/blake3 should be imported to make it available
-pub const BLAKE3: &str = "blake3";
+pub const CANONICAL: &str = SHA256;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Algorithm {
-    pub name: String,
-    // #[serde(skip)]
-    // pub alg: dyn CryptoHash,
+pub struct Algorithm<'a> {
+    pub name: &'a str,
+    pub bitsize: isize,
 }
 
-impl Algorithm {
-    pub fn new(name: &str) -> Algorithm {
+impl Algorithm<'_> {
+    pub fn new(name: &str, size: isize) -> Algorithm {
         Algorithm {
-            name: name.to_string(),
-            // alg: match name {
-            //     CANONICAL => Box::new(super::sha::Sha256::new()),
-            //     _ => Box::new(super::sha::Sha256::new()),
-            // },
+            name,
+            bitsize: size,
+        }
+    }
+}
+
+impl CryptoHash for Algorithm<'static> {
+    fn available(self) -> bool {
+        true
+    }
+
+    fn string(self) -> &'static str {
+        self.name
+    }
+
+    fn size(self) -> isize {
+        self.bitsize
+    }
+
+    fn set(self, name: &str) -> Result<Self, Error> {
+        match name {
+            SHA256 => Ok(Algorithm::new(SHA256, 256)),
+            SHA384 => Ok(Algorithm::new(SHA384, 384)),
+            SHA512 => Ok(Algorithm::new(SHA512, 512)),
+            _ => Err(Error::new(ErrorKind::Other, "Unsupported algorithm")),
         }
     }
 
-    pub fn available(algorithm: &Algorithm) -> bool {
-        return match algorithm.name.as_str() {
-            super::sha::SHA256 => true,
-            super::sha::SHA384 => true,
-            super::sha::SHA512 => true,
-            BLAKE3 => true,
-            _ => false,
-        };
+    fn digester(self) -> Box<dyn DynDigest> {
+        match self.name {
+            SHA256 => Box::new(Sha256::new()),
+            SHA384 => Box::new(Sha384::new()),
+            SHA512 => Box::new(Sha512::new()),
+            _ => panic!("Unsupported algorithm"),
+        }
+    }
+    fn hash(self) -> Box<dyn DynDigest> {
+        self.digester()
     }
 
-    pub fn string(self: &Self) -> String {
-        self.name.clone()
-    }
-
-    pub fn size(self: &Self) -> isize {
-        0
+    fn encode(&self, bytes: &[u8]) -> String {
+        match self.name {
+            SHA256 => {
+                let mut sha256 = Sha256::new();
+                digest::Digest::update(&mut sha256, bytes);
+                format!("{:x}", digest::Digest::finalize(sha256))
+            }
+            SHA384 => {
+                let mut sha384 = Sha384::new();
+                digest::Digest::update(&mut sha384, bytes);
+                format!("{:x}", digest::Digest::finalize(sha384))
+            }
+            SHA512 => {
+                let mut sha512 = Sha512::new();
+                digest::Digest::update(&mut sha512, bytes);
+                format!("{:x}", digest::Digest::finalize(sha512))
+            }
+            _ => panic!("Unsupported algorithm"),
+        }
     }
 }
+
+use digest::DynDigest;
+use sha2::{Digest, Sha256, Sha384, Sha512};
 
 /// CryptoHash is the interface that any hash algorithm must implement
 pub trait CryptoHash {
     // Available reports whether the given hash function is usable in the current binary.
-    fn available(&self) -> bool;
+    fn available(self) -> bool;
     // Size returns the length, in bytes, of a digest resulting from the given hash function.
-    fn size(&self) -> usize;
+    fn size(self) -> isize;
+    // String returns the name of the hash function.
+    fn string(self) -> &'static str;
+    // Set implemented to allow use of Algorithm as a command line flag.
+    fn set(self, _: &str) -> Result<Self, Error>
+    where
+        Self: Sized;
+    // Digester returns a new digester for the specified algorithm. If the algorithm
+    // does not have a digester implementation, nil will be returned. This can be
+    // checked by calling Available before calling Digester.
+    fn digester(self) -> Box<dyn DynDigest>;
+    // Hash returns a new hash as used by the algorithm. If not available, the
+    // method will panic. Check Algorithm.Available() before calling.
+    fn hash(self) -> Box<dyn DynDigest>;
+    // Encode encodes the raw bytes of a digest, typically from a hash.Hash, into
+    // the encoded portion of the digest.
+    fn encode(&self, _: &[u8]) -> String;
 }
 
 /// A digest is a cryptographic hash of a data stream.
-pub struct Algorithms {
-    algorithms: Arc<Mutex<HashMap<String, Box<dyn CryptoHash + 'static>>>>,
-    regex: Arc<Mutex<HashMap<String, regex::Regex>>>,
+pub struct Algorithms<'a> {
+    algorithms: HashMap<&'a str, isize>,
 }
 
-impl Algorithms {
+impl<'a> Algorithms<'a> {
     pub fn new() -> Self {
-        let algs = Algorithms {
-            algorithms: Arc::new(Mutex::new(HashMap::new())),
-            regex: Arc::new(Mutex::new(HashMap::new())),
+        let mut algs = Algorithms {
+            algorithms: HashMap::new(),
         };
-
-        let sha256 = super::sha::Sha256::new();
-        let sha256_size = sha256.size() * 2;
-        algs.register_algorithm(String::from(super::sha::SHA256), sha256);
-        algs.register_algorithm_regex(
-            String::from(super::sha::SHA256),
-            format!("^[a-f0-9]{}$", sha256_size),
-        );
-
-        let sha384 = super::sha::Sha384::new();
-        let sha384_size = sha384.size() * 2;
-        algs.register_algorithm(String::from(super::sha::SHA384), sha384);
-        algs.register_algorithm_regex(
-            String::from(super::sha::SHA384),
-            format!("^[a-f0-9]{}$", sha384_size),
-        );
-
-        let sha512 = super::sha::Sha512::new();
-        let sha512_size = sha512.size() * 2;
-        algs.register_algorithm(String::from(super::sha::SHA512), sha512);
-        algs.register_algorithm_regex(
-            String::from(super::sha::SHA512),
-            format!("^[a-f0-9]{}$", sha512_size),
-        );
+        algs.register_algorithm(SHA256, 256);
+        algs.register_algorithm(SHA384, 384);
+        algs.register_algorithm(SHA512, 512);
         algs
     }
 
-    pub fn get(self: &Self, name: &str) -> &Box<dyn CryptoHash> {
-        let algorithms = Arc::clone(&self.algorithms);
-        let algorithms_lock = algorithms.lock().unwrap();
-        let algorithm = algorithms_lock.get(name);
-        let alg = algorithm.map(|alg| alg.clone());
-        alg.unwrap()
-    }
-
-    /// Add an algorithm to the list of available algorithms.
-    pub fn register_algorithm<T: 'static>(self: &Self, name: String, alg: T) -> bool
-    where
-        T: CryptoHash,
-    {
-        let mut algorithms = self.algorithms.lock().unwrap();
-        return match algorithms.get(&name) {
+    // Add an algorithm to the list of available algorithms.
+    pub fn register_algorithm(self: &mut Self, name: &'a str, size: isize) -> bool {
+        match self.algorithms.get(name) {
             Some(_) => false,
             None => {
-                algorithms.insert(name, Box::new(alg));
+                self.algorithms.insert(name, size);
                 true
             }
-        };
+        }
     }
 
-    pub fn register_algorithm_regex(self: &Self, name: String, regex: String) -> bool {
-        let mut regexes = self.regex.lock().unwrap();
-        return match regexes.get(&name) {
-            Some(_) => false,
-            None => {
-                let re = Regex::new(&regex).unwrap();
-                regexes.insert(name, re);
-                true
-            }
-        };
+    pub fn get_algorithm(self: &Self, name: &'a str) -> Option<Algorithm<'a>> {
+        match self.algorithms.get(name) {
+            Some(size) => Some(Algorithm::new(name, *size)),
+            None => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Algorithms, CryptoHash};
+
+    #[test]
+    fn encode() {
+        let algs = Algorithms::new();
+        let alg = algs.get_algorithm(super::SHA256).unwrap();
+        assert_eq!(
+            alg.encode(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        assert_eq!(
+            alg.encode(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        )
     }
 }
