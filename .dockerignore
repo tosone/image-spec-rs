@@ -1,0 +1,5 @@
+# compiled files and executables
+/target/
+
+# github action workflow files
+/.github/
