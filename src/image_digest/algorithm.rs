@@ -81,6 +81,35 @@ impl CryptoHash for Algorithm<'static> {
         digest.update(bytes);
         hex::encode(digest.finalize())
     }
+
+    fn from_reader<R: std::io::Read>(&self, reader: R) -> String {
+        let mut digest: Box<dyn DynDigest>;
+        match self.name {
+            SHA256 => {
+                digest = Box::new(Sha256::new());
+            }
+            SHA384 => {
+                digest = Box::new(Sha384::new());
+            }
+            SHA512 => {
+                digest = Box::new(Sha512::new());
+            }
+            _ => panic!("Unsupported algorithm"),
+        };
+        let mut reader = reader;
+        let mut buffer = [0; 1024];
+        loop {
+            let len = match reader.read(&mut buffer) {
+                Ok(len) => len,
+                Err(_) => break,
+            };
+            if len == 0 {
+                break;
+            }
+            digest.update(&buffer[..len]);
+        }
+        hex::encode(digest.finalize())
+    }
 }
 
 use digest::DynDigest;
@@ -108,6 +137,8 @@ pub trait CryptoHash {
     // Encode encodes the raw bytes of a digest, typically from a hash.Hash, into
     // the encoded portion of the digest.
     fn encode(&self, _: &[u8]) -> String;
+
+    fn from_reader<R: std::io::Read>(&self, reader: R) -> String;
 }
 
 /// A digest is a cryptographic hash of a data stream.
@@ -160,6 +191,16 @@ mod tests {
         assert_eq!(
             alg.encode(b"hello"),
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn from_reader() {
+        let algs = Algorithms::new();
+        let alg = algs.get_algorithm(super::SHA256).unwrap();
+        assert_eq!(
+            alg.from_reader(b"hello".as_ref()),
+            "fca9125f1d755424b55a18877213a746135c1ce0087f9471a6f98cdd4600df83"
         );
     }
 }
