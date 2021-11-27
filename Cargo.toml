@@ -12,3 +12,4 @@ sha2 = { version = "~0.9" }
 regex = { version = "~1.5" }
 digest = { version = "~0.9" }
 hex = "~0.4"
+blake3 = "~1.2"
