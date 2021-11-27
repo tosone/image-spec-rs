@@ -51,7 +51,7 @@ impl CryptoHash for Algorithm<'static> {
         }
     }
 
-    fn digester(self) -> Box<dyn DynDigest> {
+    fn digester(&self) -> Box<dyn DynDigest> {
         match self.name {
             SHA256 => Box::new(Sha256::new()),
             SHA384 => Box::new(Sha384::new()),
@@ -59,29 +59,27 @@ impl CryptoHash for Algorithm<'static> {
             _ => panic!("Unsupported algorithm"),
         }
     }
+
     fn hash(self) -> Box<dyn DynDigest> {
         self.digester()
     }
 
     fn encode(&self, bytes: &[u8]) -> String {
+        let mut digest: Box<dyn DynDigest>;
         match self.name {
             SHA256 => {
-                let mut sha256 = Sha256::new();
-                digest::Digest::update(&mut sha256, bytes);
-                format!("{:x}", digest::Digest::finalize(sha256))
+                digest = Box::new(Sha256::new());
             }
             SHA384 => {
-                let mut sha384 = Sha384::new();
-                digest::Digest::update(&mut sha384, bytes);
-                format!("{:x}", digest::Digest::finalize(sha384))
+                digest = Box::new(Sha384::new());
             }
             SHA512 => {
-                let mut sha512 = Sha512::new();
-                digest::Digest::update(&mut sha512, bytes);
-                format!("{:x}", digest::Digest::finalize(sha512))
+                digest = Box::new(Sha512::new());
             }
             _ => panic!("Unsupported algorithm"),
-        }
+        };
+        digest.update(bytes);
+        hex::encode(digest.finalize())
     }
 }
 
@@ -103,7 +101,7 @@ pub trait CryptoHash {
     // Digester returns a new digester for the specified algorithm. If the algorithm
     // does not have a digester implementation, nil will be returned. This can be
     // checked by calling Available before calling Digester.
-    fn digester(self) -> Box<dyn DynDigest>;
+    fn digester(&self) -> Box<dyn DynDigest>;
     // Hash returns a new hash as used by the algorithm. If not available, the
     // method will panic. Check Algorithm.Available() before calling.
     fn hash(self) -> Box<dyn DynDigest>;
@@ -162,6 +160,6 @@ mod tests {
         assert_eq!(
             alg.encode(b"hello"),
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-        )
+        );
     }
 }
