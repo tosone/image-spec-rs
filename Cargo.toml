@@ -1,7 +1,13 @@
 [package]
-name = "image-spec"
+name = "oci-image-spec"
 version = "0.1.0"
 edition = "2021"
+homepage = "https://github.com/tosone/image-spec-rs.git"
+repository = "https://github.com/tosone/image-spec-rs.git"
+keywords = ["image", "spec", "oci"]
+description = "The OCI Image Format project creates and maintains the software shipping container image format spec (OCI Image Format)."
+license = "MIT"
+emil = "i@tosone.cn"
 
 [dependencies]
 serde_json = { version = "~1.0" }
