@@ -1,37 +1,74 @@
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+use serde::{Deserialize, Serialize};
+use std::string::String;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Digest {
-    pub str: std::string::String,
+    pub name: String,
+    pub digest: String,
 }
 
 impl Digest {
-    pub fn new(s: &str) -> Digest {
-        Digest { str: s.to_string() }
+    pub fn new(alg: super::algorithm::Algorithm, digest: &str) -> Self {
+        let name = alg.name.to_string();
+        let digest = format!("{}:{}", name, digest.to_string());
+        Self { name, digest }
     }
 
-    pub fn validate(d: Digest) -> Result<(), std::io::Error> {
-        let s = d.str.as_str();
-        if s.len() != 64 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "digest length is not 64",
-            ));
-        }
-        match s.find(':') {
-            Some(i) => {
-                if i <= 0 || i + 1 == s.len() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "invalid checksum digest format",
-                    ));
-                }
-            }
-            None => {
+    pub fn new_from_bytes(alg: super::algorithm::Algorithm, bytes: &[u8]) -> Self {
+        let name = alg.name.to_string();
+        let digest = format!("{}:{}", name, String::from_utf8(bytes.to_vec()).unwrap());
+        Self { name, digest }
+    }
+
+    pub fn string(self: Self) -> String {
+        self.digest.to_string()
+    }
+
+    pub fn algorithm(self: &Self) -> String {
+        self.digest[..self.sep_index()].to_string()
+    }
+
+    pub fn encoded(self: Self) -> String {
+        self.digest[self.sep_index() + 1..].to_string()
+    }
+
+    fn sep_index(&self) -> usize {
+        self.digest.find(':').unwrap()
+    }
+
+    pub fn validate(self: &Self) -> Result<(), std::io::Error> {
+        let alg = self.algorithm();
+        match alg.as_str() {
+            super::algorithm::SHA256 | super::algorithm::SHA384 | super::algorithm::SHA512 => {}
+            _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "invalid checksum digest format",
+                    "invalid checksum digest algorithm",
                 ));
             }
         }
-        Ok(())
+        let re = regex::Regex::new(r"^[a-z0-9]+(?:[.+_-][a-z0-9]+)*:[a-zA-Z0-9=_-]+$").unwrap();
+        if re.is_match(&self.digest) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid checksum digest format",
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate() {
+        let d = Digest {
+            name: "sha256".to_string(),
+            digest: "sha256:abcdefghijklmnopqrstuvwxyz0123456789".to_string(),
+        };
+        assert!(d.validate().is_ok());
     }
 }

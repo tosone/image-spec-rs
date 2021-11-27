@@ -16,6 +16,43 @@ pub const BLAKE3: &str = "blake3";
 // digest.
 pub const CANONICAL: &str = SHA256;
 
+use digest::DynDigest;
+use sha2::{Digest, Sha256, Sha384, Sha512};
+
+/// CryptoHash is the interface that any hash algorithm must implement
+pub trait CryptoHash {
+    // available reports whether the given hash function is usable in the current binary.
+    fn available(self) -> bool;
+    // size returns the length, in bytes, of a digest resulting from the given hash function.
+    fn size(self) -> isize;
+    // string returns the name of the hash function.
+    fn string(self) -> &'static str;
+    // set implemented to allow use of Algorithm as a command line flag.
+    fn set(self, _: &str) -> Result<Self, Error>
+    where
+        Self: Sized;
+    // digester returns a new digester for the specified algorithm. If the algorithm
+    // does not have a digester implementation, nil will be returned. This can be
+    // checked by calling Available before calling Digester.
+    fn digester(&self) -> Box<dyn DynDigest>;
+    // hash returns a new hash as used by the algorithm. If not available, the
+    // method will panic. Check Algorithm.Available() before calling.
+    fn hash(self) -> Box<dyn DynDigest>;
+    // encode encodes the raw bytes of a digest, typically from a hash.Hash, into
+    // the encoded portion of the digest.
+    fn encode(&self, _: &[u8]) -> String;
+    // from_reader returns the digest of the reader using the algorithm.
+    fn from_reader<R: std::io::Read>(&self, _: R) -> String;
+    // from_bytes digests the input and returns a Digest.
+    fn from_bytes(&self, _: &[u8]) -> String;
+    // from_string digests the string input and returns a Digest.
+    fn from_string(&self, _: &str) -> String;
+    // from_file digests the string input and returns a Digest.
+    fn from_file(&self, _: &str) -> Result<String, Error>;
+    // Validate validates the encoded portion string
+    fn validate(&self, _: &str) -> bool;
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Algorithm<'a> {
     pub name: &'a str,
@@ -231,43 +268,6 @@ impl CryptoHash for Algorithm<'static> {
     }
 }
 
-use digest::DynDigest;
-use sha2::{Digest, Sha256, Sha384, Sha512};
-
-/// CryptoHash is the interface that any hash algorithm must implement
-pub trait CryptoHash {
-    // available reports whether the given hash function is usable in the current binary.
-    fn available(self) -> bool;
-    // size returns the length, in bytes, of a digest resulting from the given hash function.
-    fn size(self) -> isize;
-    // string returns the name of the hash function.
-    fn string(self) -> &'static str;
-    // set implemented to allow use of Algorithm as a command line flag.
-    fn set(self, _: &str) -> Result<Self, Error>
-    where
-        Self: Sized;
-    // digester returns a new digester for the specified algorithm. If the algorithm
-    // does not have a digester implementation, nil will be returned. This can be
-    // checked by calling Available before calling Digester.
-    fn digester(&self) -> Box<dyn DynDigest>;
-    // hash returns a new hash as used by the algorithm. If not available, the
-    // method will panic. Check Algorithm.Available() before calling.
-    fn hash(self) -> Box<dyn DynDigest>;
-    // encode encodes the raw bytes of a digest, typically from a hash.Hash, into
-    // the encoded portion of the digest.
-    fn encode(&self, _: &[u8]) -> String;
-    // from_reader returns the digest of the reader using the algorithm.
-    fn from_reader<R: std::io::Read>(&self, _: R) -> String;
-    // from_bytes digests the input and returns a Digest.
-    fn from_bytes(&self, _: &[u8]) -> String;
-    // from_string digests the string input and returns a Digest.
-    fn from_string(&self, _: &str) -> String;
-    // from_file digests the string input and returns a Digest.
-    fn from_file(&self, _: &str) -> Result<String, Error>;
-    // Validate validates the encoded portion string
-    fn validate(&self, _: &str) -> bool;
-}
-
 /// A digest is a cryptographic hash of a data stream.
 pub struct Algorithms<'a> {
     algorithms: HashMap<&'a str, isize>,
@@ -278,6 +278,7 @@ impl<'a> Algorithms<'a> {
         let mut algs = Algorithms {
             algorithms: HashMap::new(),
         };
+        algs.register_algorithm(CANONICAL, 256);
         algs.register_algorithm(SHA256, 256);
         algs.register_algorithm(SHA384, 384);
         algs.register_algorithm(SHA512, 512);
@@ -307,6 +308,20 @@ impl<'a> Algorithms<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Algorithms, CryptoHash};
+
+    #[test]
+    fn encode_canonical() {
+        let algs = Algorithms::new();
+        let alg = algs.get_algorithm(super::CANONICAL).unwrap();
+        assert_eq!(
+            alg.encode(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        assert_eq!(
+            alg.encode(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
 
     #[test]
     fn encode() {
